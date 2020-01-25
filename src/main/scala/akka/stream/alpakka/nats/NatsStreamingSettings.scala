@@ -5,7 +5,7 @@ import java.time.{Duration, Instant}
 import com.typesafe.config.Config
 import io.nats.streaming.SubscriptionOptions
 
-import scala.collection.JavaConverters._
+import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
 
 sealed trait DeliveryStartPosition
@@ -57,7 +57,7 @@ case object NatsStreamingConnectionSettings{
 
 sealed trait NatsStreamingSubscriptionSettings{
   def cp: StreamingConnectionProvider
-  def subjects: Seq[String]
+  def subjects: List[String]
   def subscriptionQueue: String
   def durableSubscriptionName: Option[String]
   def startPosition: DeliveryStartPosition
@@ -88,7 +88,7 @@ case object NatsStreamingSubscriptionSettings{
 
 final case class SimpleSubscriptionSettings(
   cp: StreamingConnectionProvider,
-  subjects: Seq[String],
+  subjects: List[String],
   subscriptionQueue: String,
   durableSubscriptionName: Option[String],
   startPosition: DeliveryStartPosition,
@@ -103,10 +103,10 @@ case object SimpleSubscriptionSettings{
   def fromConfig(config: Config, connectionProvider: StreamingConnectionProvider): SimpleSubscriptionSettings =
     SimpleSubscriptionSettings(
       cp = connectionProvider,
-      subjects = Try(config.getStringList("subjects").asScala)
-        .orElse(Try(config.getString("subjects").split(',').map(_.trim).toSeq))
-        .orElse(Try(config.getStringList("subject").asScala))
-        .getOrElse(config.getString("subject").split(',').map(_.trim).toSeq),
+      subjects = Try(config.getStringList("subjects").asScala.toList)
+        .orElse(Try(config.getString("subjects").split(',').map(_.trim).toList))
+        .orElse(Try(config.getStringList("subject").asScala.toList))
+        .getOrElse(config.getString("subject").split(',').map(_.trim).toList),
       subscriptionQueue = config.getString("subscription-queue"),
       durableSubscriptionName = Try(config.getString("durable-subscription-name")).toOption,
       startPosition = Try(DeliveryStartPosition.fromConfig(config)).getOrElse(DeliveryStartPosition.OnlyNew),
@@ -121,7 +121,7 @@ case object SimpleSubscriptionSettings{
 
 final case class SubscriptionWithAckSettings(
   cp: StreamingConnectionProvider,
-  subjects: Seq[String],
+  subjects: List[String],
   subscriptionQueue: String,
   durableSubscriptionName: Option[String],
   startPosition: DeliveryStartPosition,

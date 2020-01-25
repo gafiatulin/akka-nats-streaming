@@ -3,7 +3,7 @@ package akka.stream.alpakka.nats
 import akka.Done
 import akka.stream.stage._
 import akka.stream.{Attributes, Inlet, SinkShape}
-import io.nats.client.{ConnectionEvent, NATSException}
+import io.nats.client.{Connection, ConnectionListener, Consumer, ErrorListener}
 import io.nats.streaming.{AckHandler, StreamingConnection}
 
 import scala.concurrent.{Future, Promise}
@@ -22,11 +22,17 @@ private[nats] abstract class NatsStreamingSinkStageLogic[T <: NatsStreamingOutgo
 
   override def preStart(): Unit =
     try{
-      connection = settings.cp.connection
-      val natsConnection = connection.getNatsConnection
-      natsConnection.setClosedCallback((_: ConnectionEvent) => failureCallback.invoke(new Exception("Connection closed")))
-      natsConnection.setDisconnectedCallback((_: ConnectionEvent) => failureCallback.invoke(new Exception("Disconnected")))
-      natsConnection.setExceptionHandler((ex: NATSException) => failureCallback.invoke(ex))
+      val connectionListener: ConnectionListener = (_: Connection, `type`: ConnectionListener.Events) => `type` match {
+        case ConnectionListener.Events.CLOSED => failureCallback.invoke(new Exception("Connection closed"))
+        case ConnectionListener.Events.DISCONNECTED => failureCallback.invoke(new Exception("Disconnected"))
+        case _ => ()
+      }
+      val errorListener: ErrorListener = new ErrorListener {
+        def errorOccurred(conn: Connection, error: String): Unit = failureCallback.invoke(new Exception(error))
+        def exceptionOccurred(conn: Connection, exp: Exception): Unit = log.debug("Nats exception occurred (handled by the library)", exp)
+        def slowConsumerDetected(conn: Connection, consumer: Consumer): Unit = log.debug("Slow nats consumer detected")
+      }
+      connection = settings.cp.connection(connectionListener, errorListener)
       pull(in)
       super.preStart()
     } catch {

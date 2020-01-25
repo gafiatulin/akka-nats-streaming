@@ -6,7 +6,7 @@ import akka.Done
 import akka.stream.impl.Buffer
 import akka.stream.stage._
 import akka.stream.{Attributes, Outlet, SourceShape}
-import io.nats.client.{ConnectionEvent, NATSException}
+import io.nats.client.{Connection, ConnectionListener, Consumer, ErrorListener}
 import io.nats.streaming.{Message, MessageHandler, StreamingConnection}
 
 import scala.concurrent.Promise
@@ -59,17 +59,23 @@ private[nats] abstract class NatsStreamingSourceStageLogic[T1 <: NatsStreamingSu
   }
 
   override def preStart(): Unit = try{
-    buffer = Buffer[T2](settings.bufferSize, materializer)
+    buffer = Buffer[T2](settings.bufferSize, settings.bufferSize)
     failureLogic = getAsyncCallback(handleFailure)
     processingLogic = getAsyncCallback(process)
-    connection = settings.cp.connection
+    val connectionListener: ConnectionListener = (_: Connection, `type`: ConnectionListener.Events) => `type` match {
+      case ConnectionListener.Events.CLOSED => failureLogic.invoke(new Exception("Connection closed"))
+      case ConnectionListener.Events.DISCONNECTED => failureLogic.invoke(new Exception("Disconnected"))
+      case _ => ()
+    }
+    val errorListener: ErrorListener = new ErrorListener {
+      def errorOccurred(conn: Connection, error: String): Unit = failureLogic.invoke(new Exception(error))
+      def exceptionOccurred(conn: Connection, exp: Exception): Unit = log.debug("Nats exception occurred (handled by the library)", exp)
+      def slowConsumerDetected(conn: Connection, consumer: Consumer): Unit = log.debug("Slow nats consumer detected")
+    }
+    connection = settings.cp.connection(connectionListener, errorListener)
     subscriptions = settings.subjects.map{s =>
       connection.subscribe(s, settings.subscriptionQueue, messageHandler, settings.subscriptionOptions)
     }
-    val natsConnection = connection.getNatsConnection
-    natsConnection.setClosedCallback((_: ConnectionEvent) => failureLogic.invoke(new Exception("Connection closed")))
-    natsConnection.setDisconnectedCallback((_: ConnectionEvent) => failureLogic.invoke(new Exception("Disconnected")))
-    natsConnection.setExceptionHandler((e: NATSException) => failureLogic.invoke(e))
     if (scheduled.compareAndSet(false, true)) processingLogic.invoke(())
     log.debug("Nats connection initiated")
     super.preStart()
